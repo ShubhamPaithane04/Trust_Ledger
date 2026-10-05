@@ -1,161 +1,180 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from '@tanstack/react-router';
-import { Shield, LayoutDashboard, QrCode, Activity, Map, Database, X, AlertTriangle, Menu } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Boxes, LayoutGrid, ScanLine, Network, TriangleAlert, Menu, X, ShieldCheck, ShieldX } from 'lucide-react';
+import { useAlerts, useChain } from '@/lib/queries';
+import { anomalyDetail, ruleFor, type Alert } from '@/lib/chainverify';
 
-export function DashboardLayout({ children }: { children: React.ReactNode }) {
+const NAV = [
+  { path: '/dashboard', label: 'Overview', icon: LayoutGrid },
+  { path: '/scanner', label: 'Verify product', icon: ScanLine },
+  { path: '/explorer', label: 'Ledger', icon: Boxes },
+  { path: '/map', label: 'Network', icon: Network },
+  { path: '/ai-center', label: 'Alerts', icon: TriangleAlert },
+] as const;
+
+export function Logo({ dark = false }: { dark?: boolean }) {
+  return (
+    <span className="flex items-center gap-2.5">
+      <span
+        className={`grid h-7 w-7 place-items-center rounded-[5px] ${dark ? 'bg-side-ink text-side' : 'bg-ink text-white'}`}
+      >
+        <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <rect x="1.5" y="5" width="5" height="6" rx="1" />
+          <rect x="9.5" y="5" width="5" height="6" rx="1" />
+          <path d="M6.5 8h3" />
+        </svg>
+      </span>
+      <span className={`text-[15px] font-semibold tracking-tight ${dark ? 'text-side-ink' : 'text-ink'}`}>ChainVerify</span>
+    </span>
+  );
+}
+
+interface LayoutProps {
+  children: React.ReactNode;
+  title?: string;
+  description?: string;
+  actions?: React.ReactNode;
+}
+
+export function DashboardLayout({ children, title, description, actions }: LayoutProps) {
   const location = useLocation();
-  const [toast, setToast] = useState<any>(null);
-  const [seenAlerts, setSeenAlerts] = useState<Set<number>>(new Set());
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const { data: chain } = useChain();
+  const { data: alerts } = useAlerts();
+  const toasts = useNewAlertToasts(alerts);
 
-  useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const res = await fetch('/api/alerts').then(r => r.json());
-        if (res && res.length > 0) {
-          const latest = res[0];
-          if (!seenAlerts.has(latest.id)) {
-            setSeenAlerts(prev => new Set(prev).add(latest.id));
-            setToast(latest);
-            setTimeout(() => setToast(null), 5000);
-          }
-        }
-      } catch (e) {
-        // ignore
-      }
-    };
-    const interval = setInterval(fetchAlerts, 2000);
-    return () => clearInterval(interval);
-  }, [seenAlerts]);
-
-  const navItems = [
-    { path: '/dashboard', label: 'Manufacturer', icon: LayoutDashboard },
-    { path: '/explorer', label: 'Block Explorer', icon: Database },
-    { path: '/map', label: 'Network Map', icon: Map },
-    { path: '/ai-center', label: 'AI Trust Center', icon: Activity },
-    { path: '/scanner', label: 'Consumer Scanner', icon: QrCode },
-  ];
-
-  const SidebarContent = () => (
-    <>
-      <div>
-        <Link to="/" className="flex items-center gap-3 mb-10 text-[var(--cv-cyan)] hover:opacity-80 transition-opacity">
-          <Shield className="w-8 h-8" />
-          <h1 className="text-xl font-bold tracking-wider font-display">ChainVerify</h1>
+  const sidebar = (
+    <div className="flex h-full flex-col">
+      <div className="flex h-14 items-center px-5">
+        <Link to="/" onClick={() => setNavOpen(false)}>
+          <Logo dark />
         </Link>
-        
-        <nav className="space-y-4">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={() => setIsSidebarOpen(false)}
-                className={`flex items-center gap-3 p-3 rounded-lg transition-all duration-300 ${
-                  isActive 
-                    ? 'bg-[var(--cv-cyan)]/10 text-[var(--cv-cyan)] border border-[var(--cv-cyan)]/30 shadow-sm' 
-                    : 'text-[var(--cv-muted)] hover:text-[var(--cv-text)] hover:bg-[var(--cv-cyan)]/5'
-                }`}
-              >
-                <item.icon className="w-5 h-5" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
       </div>
 
-      <div className="space-y-6">
-        <Link 
-          to="/"
-          onClick={() => setIsSidebarOpen(false)}
-          className="flex items-center gap-3 p-3 rounded-lg transition-all duration-300 text-[var(--cv-muted)] hover:text-[var(--cv-text)] hover:bg-[var(--cv-border)] border border-transparent hover:border-[var(--cv-border)]"
-        >
-          <Shield className="w-5 h-5" />
-          Return Home
-        </Link>
-        <div className="text-xs text-[var(--cv-green)] text-center tracking-widest animate-pulse font-bold">
-          SYSTEM ACTIVE
-        </div>
+      <nav className="mt-2 flex-1 space-y-0.5 px-3">
+        {NAV.map((item) => {
+          const active = location.pathname === item.path;
+          const count = item.path === '/ai-center' ? alerts?.length ?? 0 : 0;
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              onClick={() => setNavOpen(false)}
+              className={`flex h-9 items-center gap-3 rounded-[4px] px-3 text-sm ${
+                active ? 'bg-white/10 text-side-ink' : 'text-side-sub hover:bg-white/5 hover:text-side-ink'
+              }`}
+            >
+              <item.icon className="h-4 w-4" strokeWidth={1.75} />
+              <span className="flex-1">{item.label}</span>
+              {count > 0 && <span className="tabular text-xs text-[#f3a3a3]">{count}</span>}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="border-t border-side-rule p-4">
+        <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-side-sub">Ledger status</p>
+        {!chain ? (
+          <p className="text-sm text-side-sub">Connecting…</p>
+        ) : chain.isValid ? (
+          <p className="flex items-center gap-2 text-sm text-side-ink">
+            <ShieldCheck className="h-4 w-4 text-[#6fcf97]" /> {chain.chain.length} blocks, all hashes valid
+          </p>
+        ) : (
+          <p className="flex items-center gap-2 text-sm text-[#f3a3a3]">
+            <ShieldX className="h-4 w-4" /> Hash mismatch at block #{chain.invalidBlock}
+          </p>
+        )}
       </div>
-    </>
+    </div>
   );
 
   return (
-    <div className="flex h-screen bg-transparent overflow-hidden text-[var(--cv-text)] font-mono">
-      <aside className="hidden lg:flex w-64 border-r border-[var(--cv-border)] glass p-6 flex-col justify-between z-40 bg-white/30">
-        <SidebarContent />
-      </aside>
+    <div className="flex h-screen overflow-hidden bg-paper text-ink">
+      <aside className="hidden w-60 shrink-0 bg-side lg:block">{sidebar}</aside>
 
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <>
-            <motion.button
+      {navOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button aria-label="Close navigation" className="absolute inset-0 bg-black/40" onClick={() => setNavOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-64 bg-side">
+            <button
               aria-label="Close navigation"
-              className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsSidebarOpen(false)}
-            />
-            <motion.aside
-              initial={{ x: -280 }}
-              animate={{ x: 0 }}
-              exit={{ x: -280 }}
-              transition={{ type: 'spring', damping: 28, stiffness: 240 }}
-              className="fixed inset-y-0 left-0 w-72 border-r border-[var(--cv-border)] glass p-6 flex flex-col justify-between z-50 bg-[var(--cv-bg)] lg:hidden"
+              onClick={() => setNavOpen(false)}
+              className="absolute right-3 top-3.5 p-1.5 text-side-sub hover:text-side-ink"
             >
-              <button
-                aria-label="Close navigation"
-                onClick={() => setIsSidebarOpen(false)}
-                className="absolute right-4 top-4 rounded-lg border border-[var(--cv-border)] p-2 text-[var(--cv-muted)] hover:text-[var(--cv-text)]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-              <SidebarContent />
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
-
-      <main className="flex-1 overflow-y-auto p-4 pt-20 md:p-8 relative">
-        <button
-          aria-label="Open navigation"
-          onClick={() => setIsSidebarOpen(true)}
-          className="fixed left-4 top-4 z-30 rounded-xl border border-[var(--cv-border)] glass bg-white/70 p-3 text-[var(--cv-text)] shadow-sm lg:hidden"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-        <div className="relative z-10 max-w-7xl mx-auto">
-          {children}
-        </div>
-      </main>
-
-      {/* Global Toast Notification */}
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, x: 100 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 100 }}
-            className="fixed bottom-8 right-8 z-50 glass bg-white/80 border-[#FF4455] p-4 pr-12 rounded-xl shadow-xl max-w-sm"
-          >
-            <button onClick={() => setToast(null)} className="absolute top-2 right-2 text-gray-500 hover:text-black">
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
-            <div className="flex gap-3">
-              <AlertTriangle className="w-6 h-6 text-[#FF4455] flex-shrink-0 animate-pulse" />
-              <div>
-                <h4 className="text-[#FF4455] font-bold font-display text-sm tracking-wider">ANOMALY DETECTED</h4>
-                <p className="text-xs text-[var(--cv-muted)] mt-1">Product: <span className="text-[var(--cv-text)] font-bold">{toast.productId}</span></p>
-                <p className="text-[10px] text-[#D08A3E] mt-2 leading-tight font-bold">{toast.anomalies[0]?.toUpperCase()}</p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {sidebar}
+          </aside>
+        </div>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-rule bg-panel px-4 lg:hidden">
+          <button aria-label="Open navigation" onClick={() => setNavOpen(true)} className="p-1.5 text-sub hover:text-ink">
+            <Menu className="h-5 w-5" />
+          </button>
+          <Logo />
+        </div>
+
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[1280px] px-4 py-6 md:px-8 md:py-8">
+            {title && (
+              <header className="mb-6 flex flex-col gap-4 border-b border-rule pb-5 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
+                  {description && <p className="mt-1 max-w-2xl text-sm text-sub">{description}</p>}
+                </div>
+                {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+              </header>
+            )}
+            {children}
+          </div>
+        </main>
+      </div>
+
+      <div className="fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] space-y-2">
+        {toasts.items.map((alert) => (
+          <div key={alert.id} role="alert" className="panel border-l-[3px] border-l-bad p-3.5 pr-9 shadow-lg relative">
+            <button
+              aria-label="Dismiss"
+              onClick={() => toasts.dismiss(alert.id)}
+              className="absolute right-2 top-2 p-1 text-faint hover:text-ink"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+            <p className="text-sm font-semibold text-bad">
+              {ruleFor(alert.anomalies[0] ?? '')?.name ?? 'Anomaly'} on {alert.productId}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-sub">{anomalyDetail(alert.anomalies[0] ?? '')}</p>
+            <Link to="/ai-center" className="mt-2 inline-block text-xs font-medium text-brand hover:underline">
+              View alert
+            </Link>
+          </div>
+        ))}
+      </div>
     </div>
   );
+}
+
+// Shows a toast only for alerts that arrive after the page first loaded
+function useNewAlertToasts(alerts: Alert[] | undefined) {
+  const seen = useRef<Set<number> | null>(null);
+  const [items, setItems] = useState<Alert[]>([]);
+
+  useEffect(() => {
+    if (!alerts) return;
+    if (!seen.current) {
+      seen.current = new Set(alerts.map((a) => a.id));
+      return;
+    }
+    const fresh = alerts.filter((a) => !seen.current!.has(a.id));
+    if (fresh.length === 0) return;
+    fresh.forEach((a) => seen.current!.add(a.id));
+    setItems((prev) => [...fresh, ...prev].slice(0, 3));
+    const ids = fresh.map((a) => a.id);
+    setTimeout(() => setItems((prev) => prev.filter((a) => !ids.includes(a.id))), 7000);
+  }, [alerts]);
+
+  return { items, dismiss: (id: number) => setItems((prev) => prev.filter((a) => a.id !== id)) };
 }

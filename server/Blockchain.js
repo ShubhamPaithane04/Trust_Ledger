@@ -41,22 +41,37 @@ class Blockchain {
     this.chain.push(newBlock);
   }
 
-  verifyChain() {
+  // Returns the index of the first block that fails verification, or -1 if the chain is intact
+  findInvalidBlock() {
     for (let i = 1; i < this.chain.length; i++) {
       const currentBlock = this.chain[i];
       const previousBlock = this.chain[i - 1];
 
       // Recalculate hash to ensure data hasn't been tampered with
       if (currentBlock.hash !== currentBlock.calculateHash()) {
-        return false;
+        return i;
       }
 
       // Check if previous hash matches
       if (currentBlock.previousHash !== previousBlock.hash) {
-        return false;
+        return i;
       }
     }
-    return true;
+    return -1;
+  }
+
+  verifyChain() {
+    return this.findInvalidBlock() === -1;
+  }
+
+  // Rebuild a chain from plain JSON, keeping stored hashes so tampering stays detectable
+  static fromJSON(rawChain) {
+    const blockchain = new Blockchain();
+    blockchain.chain = rawChain.map((raw) => {
+      const block = Object.create(Block.prototype);
+      return Object.assign(block, raw);
+    });
+    return blockchain;
   }
 }
 

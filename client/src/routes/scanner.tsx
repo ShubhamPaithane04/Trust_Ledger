@@ -1,291 +1,295 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
-import { useState, useEffect } from 'react';
-import { ScanFace, CheckCircle, XCircle, ShieldCheck, Shield } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { createFileRoute } from '@tanstack/react-router';
+import { useState } from 'react';
+import { Check, CircleAlert, X } from 'lucide-react';
+import { DashboardLayout } from '../components/DashboardLayout';
+import { PanelHeader } from '../components/Parts';
+import {
+  LOCATIONS,
+  RULES,
+  STAGES,
+  anomalyDetail,
+  formatTime,
+  readJson,
+  ruleFor,
+  shortHash,
+  type AIResult,
+  type ProductHistory,
+} from '@/lib/chainverify';
+import { useProducts, useRefreshLedger } from '@/lib/queries';
 
 export const Route = createFileRoute('/scanner')({
-  component: ConsumerScanner,
+  component: VerifyProduct,
+  head: () => ({ meta: [{ title: 'Verify product | ChainVerify' }] }),
 });
 
-interface ProductMap {
-  [key: string]: { name: string };
-}
+type Outcome =
+  | { kind: 'scanned'; result: AIResult; block: { index: number; hash: string }; history: ProductHistory | null }
+  | { kind: 'missing'; productId: string }
+  | { kind: 'error'; message: string };
 
-interface ScanData {
-  productId: string;
-  location: string;
-  image?: string;
-}
+function VerifyProduct() {
+  const { data: products } = useProducts();
+  const refresh = useRefreshLedger();
+  const [form, setForm] = useState({ productId: 'PRD-101', location: 'Tokyo', stage: 'Consumer' });
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
 
-interface ScanResult {
-  isAuthentic: boolean;
-  trustScore: number;
-  anomalies: string[];
-}
-
-function ConsumerScanner() {
-  const [products, setProducts] = useState<ProductMap>({});
-  const [scanData, setScanData] = useState<ScanData>({ productId: 'PRD-101', location: 'Tokyo' });
-  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanLogs, setScanLogs] = useState<string[]>([]);
-
-  useEffect(() => {
-    fetch('/api/products')
-      .then((res) => res.json())
-      .then(setProducts)
-      .catch(console.error);
-  }, []);
-
-  const handleScan = async () => {
-    if (!scanData.productId) return;
-    
-    setIsScanning(true);
-    setScanResult(null);
-    setScanLogs(['> INITIALIZING SECURE SCAN...', '> AWAITING SENSOR DATA...']);
-    
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-    
-    await sleep(600);
-    setScanLogs(prev => [...prev, '> CAPTURING ENVIRONMENTAL PARAMS (LOCATION, TEMP)...', '> STATUS: OK']);
-    
-    await sleep(700);
-    setScanLogs(prev => [...prev, '> CALCULATING SHA-256 CRYPTOGRAPHIC HASH...']);
-    
-    await sleep(500);
-    setScanLogs(prev => [...prev, '> HASH: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855']);
-    
-    await sleep(800);
-    setScanLogs(prev => [...prev, '> QUERYING AI ANOMALY ENGINE...', '> CHECKING SPATIAL-TEMPORAL CONSTRAINTS...']);
-    
-    await sleep(1000);
-
+  const scan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const productId = form.productId.trim().toUpperCase();
+    if (!productId) return;
+    setBusy(true);
+    setOutcome(null);
     try {
       const response = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...scanData, stage: 'Consumer' })
+        body: JSON.stringify({ ...form, productId }),
       });
-      const res = await response.json();
-      
-      setScanLogs(prev => [...prev, '> AI ANALYSIS COMPLETE.', '> BLOCKCHAIN VERIFICATION COMPLETE.', '> RENDERING RESULT...']);
-      await sleep(400);
-
-      if (!response.ok || res.error) {
-        setScanResult({
-          isAuthentic: false,
-          trustScore: 0,
-          anomalies: ['PRODUCT NOT FOUND IN LEDGER', 'UNREGISTERED OR COUNTERFEIT ITEM']
-        });
-      } else {
-        setScanResult(res.result);
+      if (response.status === 404) {
+        setOutcome({ kind: 'missing', productId });
+        return;
       }
+      const res = await readJson<{ result: AIResult; block: { index: number; hash: string } }>(response);
+      const history = await fetch(`/api/products/${encodeURIComponent(productId)}/history`)
+        .then((r) => readJson<ProductHistory>(r))
+        .catch(() => null);
+      setOutcome({ kind: 'scanned', result: res.result, block: res.block, history });
+      refresh();
     } catch (err) {
-      console.error(err);
-      setScanLogs(prev => [...prev, '> ERROR: NETWORK FAILURE']);
+      setOutcome({ kind: 'error', message: err instanceof Error ? err.message : 'Scan failed' });
+    } finally {
+      setBusy(false);
     }
-    setIsScanning(false);
   };
 
   return (
-    <div className="min-h-screen bg-transparent flex flex-col font-display text-[var(--cv-text)] pb-12">
-      <header className="p-6 md:p-8 flex justify-between items-center z-10 relative">
-        <Link to="/" className="flex items-center gap-3 text-[var(--cv-cyan)] hover:opacity-80 transition-opacity">
-          <Shield className="w-8 h-8" />
-          <h1 className="text-2xl font-bold tracking-wider">ChainVerify</h1>
-        </Link>
-        <div className="glass px-5 py-2.5 rounded-full border border-[var(--cv-cyan)]/30 text-xs font-mono font-bold tracking-widest text-[var(--cv-cyan)] shadow-sm bg-white/40 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-[var(--cv-cyan)] animate-pulse" /> CONSUMER PORTAL
-        </div>
-      </header>
-
-      <main className="flex-1 p-6 relative z-10 flex flex-col lg:flex-row items-center justify-center gap-12 max-w-7xl mx-auto w-full">
-        {/* Scanner Card */}
-        <div className="w-full max-w-lg">
-          <div className="text-center mb-10">
-            <h2 className="text-4xl font-bold mb-3 font-display text-[var(--cv-text)] tracking-tight">Verify Product</h2>
-            <p className="text-[var(--cv-muted)] font-mono text-sm tracking-widest font-bold">SCAN QR TO AUTHENTICATE VIA BLOCKCHAIN</p>
-          </div>
-
-          {!scanResult ? (
-            <div className="glass bg-white/70 p-8 md:p-10 flex flex-col items-center relative overflow-hidden rounded-3xl border border-[var(--cv-border)] shadow-xl transition-all">
-              <AnimatePresence>
-                {isScanning && (
-                  <motion.div 
-                    initial={{ top: -100 }}
-                    animate={{ top: '100%' }}
-                    transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                    className="absolute left-0 w-full h-1.5 bg-[var(--cv-cyan)] shadow-[0_0_20px_rgba(46,93,84,0.8)] z-10"
-                  />
-                )}
-              </AnimatePresence>
-
-              <ScanFace className={`w-32 h-32 mb-8 transition-colors duration-500 ${isScanning ? 'text-[var(--cv-cyan)] animate-pulse drop-shadow-lg' : 'text-[var(--cv-muted)] opacity-50'}`} />
-              
-              <div className="w-full space-y-6">
-                <div>
-                  <label className="text-xs text-[var(--cv-muted)] font-mono tracking-widest mb-2 block font-bold">ENTER OR SELECT PRODUCT ID</label>
-                  <input 
-                    type="text"
-                    list="product-ids"
-                    placeholder="e.g. PRD-101..."
-                    className="w-full bg-white border border-[var(--cv-border)] rounded-xl p-4 text-[var(--cv-text)] outline-none focus:border-[var(--cv-cyan)] font-mono text-sm shadow-sm transition-colors"
-                    value={scanData.productId}
-                    onChange={e => setScanData({...scanData, productId: e.target.value})}
-                    disabled={isScanning}
-                  />
-                  <datalist id="product-ids">
-                    {Object.keys(products).map(id => (
-                      <option key={id} value={id}>{products[id].name}</option>
-                    ))}
-                  </datalist>
-                </div>
-
-                <div>
-                  <label className="text-xs text-[var(--cv-muted)] font-mono tracking-widest mb-2 block font-bold">SCAN LOCATION</label>
-                  <select 
-                    className="w-full bg-white border border-[var(--cv-border)] rounded-xl p-4 text-[var(--cv-text)] outline-none focus:border-[var(--cv-cyan)] font-mono text-sm shadow-sm transition-colors"
-                    value={scanData.location}
-                    onChange={e => setScanData({...scanData, location: e.target.value})}
-                    disabled={isScanning}
-                  >
-                    {['Tokyo', 'London', 'New York', 'Mumbai', 'Dubai', 'Paris', 'Singapore', 'Sydney', 'San Francisco', 'Toronto'].map(loc => (
-                      <option key={loc} value={loc}>{loc}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs text-[var(--cv-muted)] font-mono tracking-widest mb-2 block font-bold">PRODUCT IMAGE (OPTIONAL)</label>
-                  <label className="w-full bg-white/50 border-2 border-dashed border-[var(--cv-border)] rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-[var(--cv-cyan)]/5 hover:border-[var(--cv-cyan)]/50 transition-all text-[var(--cv-muted)] relative overflow-hidden group">
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      className="hidden" 
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          setScanData({...scanData, image: URL.createObjectURL(e.target.files[0])});
-                        }
-                      }}
-                      disabled={isScanning}
-                    />
-                    {scanData.image ? (
-                      <div className="absolute inset-0">
-                        <img src={scanData.image} alt="Upload Preview" className="w-full h-full object-cover opacity-70 group-hover:opacity-80 transition-opacity" />
-                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                          <span className="font-mono text-xs font-bold text-white bg-black/60 px-4 py-1.5 rounded-full backdrop-blur-sm">IMAGE CAPTURED ✓</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <Shield className="w-8 h-8 mb-3 opacity-40 group-hover:opacity-60 transition-opacity" />
-                        <span className="font-mono text-xs font-bold">CLICK OR DROP TO UPLOAD EVIDENCE</span>
-                      </>
-                    )}
-                  </label>
-                </div>
-
-                <button 
-                  onClick={handleScan}
-                  disabled={isScanning || !scanData.productId}
-                  className={`w-full py-4 rounded-xl font-bold tracking-widest text-sm transition-all duration-300 shadow-md ${
-                    isScanning || !scanData.productId ? 'bg-[var(--cv-cyan)]/10 text-[var(--cv-cyan)] cursor-not-allowed shadow-none' : 'btn-primary hover:-translate-y-1'
-                  }`}
-                >
-                  {isScanning ? 'ANALYZING LEDGER...' : 'SIMULATE SCAN'}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className={`glass bg-white/90 p-10 text-center rounded-3xl border-2 shadow-2xl ${scanResult.isAuthentic ? 'border-[var(--cv-green)]' : 'border-[var(--cv-red)] glow-red'} relative overflow-hidden`}
-            >
-              <div className={`absolute inset-0 opacity-5 ${scanResult.isAuthentic ? 'bg-[var(--cv-green)]' : 'bg-[var(--cv-red)]'}`} />
-              
-              <div className="relative z-10">
-                {scanResult.isAuthentic ? (
-                  <CheckCircle className="w-32 h-32 text-[var(--cv-green)] mx-auto mb-6 drop-shadow-md" />
-                ) : (
-                  <XCircle className="w-32 h-32 text-[var(--cv-red)] mx-auto mb-6 drop-shadow-md animate-pulse" />
-                )}
-                
-                <h3 className={`text-3xl font-black mb-3 font-display tracking-wider ${scanResult.isAuthentic ? 'text-[var(--cv-green)]' : 'text-[var(--cv-red)]'}`}>
-                  {scanResult.isAuthentic ? 'VERIFIED AUTHENTIC' : 'COUNTERFEIT WARNING'}
-                </h3>
-                
-                <div className="flex items-center justify-center gap-3 mb-8 bg-black/5 inline-flex px-5 py-2.5 rounded-full border border-[var(--cv-border)] shadow-sm">
-                  <ShieldCheck className={`w-5 h-5 ${scanResult.isAuthentic ? 'text-[var(--cv-green)]' : 'text-[var(--cv-red)]'}`} />
-                  <span className="text-[var(--cv-text)] font-mono tracking-wider font-bold text-sm">TRUST SCORE: {scanResult.trustScore}%</span>
-                </div>
-
-                {!scanResult.isAuthentic && scanResult.anomalies.length > 0 && (
-                  <div className="bg-[var(--cv-red)]/10 border border-[var(--cv-red)]/20 p-6 rounded-2xl text-left mb-8 backdrop-blur-md shadow-inner">
-                    <p className="text-[var(--cv-red)] font-bold mb-4 font-mono tracking-widest text-xs uppercase">AI Flags Detected:</p>
-                    <ul className="space-y-3">
-                      {scanResult.anomalies.map((anom, i) => (
-                        <li key={i} className="text-sm text-[var(--cv-orange)] font-mono flex items-start gap-3 font-bold leading-relaxed">
-                          <span className="text-[var(--cv-red)] mt-0.5">&gt;</span> {anom.toUpperCase()}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                <button 
-                  onClick={() => setScanResult(null)}
-                  className="w-full bg-white border border-[var(--cv-border)] text-[var(--cv-text)] font-bold py-4 rounded-xl hover:bg-black/5 transition-colors text-sm tracking-widest shadow-sm"
-                >
-                  SCAN ANOTHER ITEM
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </div>
-
-        {/* Terminal Logs */}
-        <div className="w-full lg:w-[500px] h-[500px] lg:h-[650px] bg-[#0A0A0A] rounded-3xl border border-[var(--cv-cyan)]/20 shadow-2xl overflow-hidden flex flex-col relative">
-          <div className="bg-[#151515] p-4 border-b border-[var(--cv-cyan)]/10 flex items-center justify-between">
-            <div className="flex gap-2.5">
-              <div className="w-3 h-3 rounded-full bg-red-500/80 shadow-sm" />
-              <div className="w-3 h-3 rounded-full bg-yellow-500/80 shadow-sm" />
-              <div className="w-3 h-3 rounded-full bg-green-500/80 shadow-sm" />
-            </div>
-            <span className="font-mono text-[10px] text-[var(--cv-cyan)] tracking-[0.2em] opacity-80 font-bold">CHAINVERIFY_NODE_v1.0.4</span>
-          </div>
-          
-          <div className="flex-1 p-6 font-mono text-xs md:text-sm text-[var(--cv-cyan)] overflow-y-auto space-y-3 relative">
-            <div className="absolute inset-0 bg-[linear-gradient(rgba(0,212,255,0.03)_1px,transparent_1px)] bg-[length:100%_4px] pointer-events-none" />
-            
-            {scanLogs.length === 0 ? (
-              <div className="opacity-40">SYSTEM IDLE... AWAITING SCAN INPUT.</div>
-            ) : (
-              <AnimatePresence>
-                {scanLogs.map((log, i) => (
-                  <motion.div 
-                    key={i}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="leading-relaxed"
-                  >
-                    {log}
-                  </motion.div>
+    <DashboardLayout
+      title="Verify a product"
+      description="Record a scan the way a customer or retailer would. The scan is written to the ledger and checked against the product's full history."
+    >
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <section className="panel self-start lg:col-span-4">
+          <PanelHeader title="Scan details" />
+          <form onSubmit={scan} className="space-y-4 p-4">
+            <div>
+              <label className="label" htmlFor="sid">
+                Product ID
+              </label>
+              <input
+                id="sid"
+                list="product-ids"
+                className="field font-mono"
+                value={form.productId}
+                onChange={(e) => setForm({ ...form, productId: e.target.value })}
+                disabled={busy}
+              />
+              <datalist id="product-ids">
+                {Object.entries(products ?? {}).map(([id, p]) => (
+                  <option key={id} value={id}>
+                    {p.name}
+                  </option>
                 ))}
-                {isScanning && (
-                  <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ repeat: Infinity, duration: 0.8 }}
-                    className="w-2.5 h-4 bg-[var(--cv-cyan)] mt-2 inline-block"
-                  />
-                )}
-              </AnimatePresence>
-            )}
+              </datalist>
+              {products?.[form.productId.trim().toUpperCase()] && (
+                <p className="mt-1.5 text-xs text-sub">{products[form.productId.trim().toUpperCase()].name}</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label" htmlFor="sloc">
+                  Location
+                </label>
+                <select
+                  id="sloc"
+                  className="field"
+                  value={form.location}
+                  onChange={(e) => setForm({ ...form, location: e.target.value })}
+                  disabled={busy}
+                >
+                  {LOCATIONS.map((l) => (
+                    <option key={l}>{l}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label" htmlFor="sstage">
+                  Stage
+                </label>
+                <select
+                  id="sstage"
+                  className="field"
+                  value={form.stage}
+                  onChange={(e) => setForm({ ...form, stage: e.target.value })}
+                  disabled={busy}
+                >
+                  {STAGES.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <button type="submit" disabled={busy || !form.productId.trim()} className="btn btn-solid w-full">
+              {busy ? 'Checking…' : 'Scan and verify'}
+            </button>
+            <p className="text-xs leading-relaxed text-faint">
+              Tip: scan PRD-101 in Sydney right after scanning it in London to trigger the impossible travel check.
+            </p>
+          </form>
+        </section>
+
+        <div className="lg:col-span-8">
+          {!outcome && !busy && <Placeholder />}
+          {busy && <div className="panel px-4 py-16 text-center text-sm text-sub">Writing scan and running checks…</div>}
+          {outcome?.kind === 'error' && (
+            <div className="panel border-l-[3px] border-l-bad p-4 text-sm text-bad">{outcome.message}</div>
+          )}
+          {outcome?.kind === 'missing' && <Missing productId={outcome.productId} />}
+          {outcome?.kind === 'scanned' && <Result outcome={outcome} />}
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}
+
+function Placeholder() {
+  return (
+    <section className="panel">
+      <PanelHeader title="What gets checked" />
+      <ul className="divide-y divide-rule">
+        <li className="flex gap-4 px-4 py-3.5">
+          <span className="w-12 shrink-0 text-xs font-semibold text-faint">LEDGER</span>
+          <div>
+            <p className="text-sm font-medium">Registered product</p>
+            <p className="text-sm text-sub">The ID must have been minted by a manufacturer. Unknown IDs are rejected.</p>
+          </div>
+        </li>
+        {RULES.map((r) => (
+          <li key={r.key} className="flex gap-4 px-4 py-3.5">
+            <span className="tabular w-12 shrink-0 text-xs font-semibold text-faint">−{r.penalty}</span>
+            <div>
+              <p className="text-sm font-medium">{r.name}</p>
+              <p className="text-sm text-sub">{r.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-rule px-4 py-3 text-xs text-sub">
+        Every scan starts at 100. A product scoring 70 or more is reported as authentic.
+      </p>
+    </section>
+  );
+}
+
+function Missing({ productId }: { productId: string }) {
+  return (
+    <section className="panel overflow-hidden">
+      <div className="flex items-start gap-3 border-b border-rule bg-bad-soft px-5 py-4">
+        <X className="mt-0.5 h-5 w-5 text-bad" />
+        <div>
+          <p className="font-semibold text-bad">Not found on the ledger</p>
+          <p className="text-sm text-sub">
+            <span className="font-mono">{productId}</span> was never registered by a manufacturer. Treat it as counterfeit.
+          </p>
+        </div>
+      </div>
+      <p className="px-5 py-4 text-sm text-sub">No block was written for this scan.</p>
+    </section>
+  );
+}
+
+function Result({ outcome }: { outcome: Extract<Outcome, { kind: 'scanned' }> }) {
+  const { result, block, history } = outcome;
+  const ok = result.isAuthentic;
+  const failed = new Set(result.anomalies.map((a) => ruleFor(a)?.key));
+
+  return (
+    <div className="space-y-6">
+      <section className="panel overflow-hidden">
+        <div className={`flex flex-wrap items-center justify-between gap-4 px-5 py-4 ${ok ? 'bg-ok-soft' : 'bg-bad-soft'}`}>
+          <div className="flex items-start gap-3">
+            {ok ? <Check className="mt-0.5 h-5 w-5 text-ok" /> : <CircleAlert className="mt-0.5 h-5 w-5 text-bad" />}
+            <div>
+              <p className={`font-semibold ${ok ? 'text-ok' : 'text-bad'}`}>
+                {ok ? 'Authentic' : 'Do not trust this product'}
+              </p>
+              <p className="text-sm text-sub">
+                {history?.name ?? history?.productId}, recorded in block #{block.index}
+              </p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-sub">Trust score</p>
+            <p className={`tabular text-[28px] font-semibold leading-none ${ok ? 'text-ok' : 'text-bad'}`}>
+              {result.trustScore}
+              <span className="text-sm font-normal text-faint"> / 100</span>
+            </p>
           </div>
         </div>
-      </main>
+
+        <ul className="divide-y divide-rule">
+          {RULES.map((r) => {
+            const hit = result.anomalies.filter((a) => a.startsWith(r.key));
+            return (
+              <li key={r.key} className="flex gap-3 px-5 py-3">
+                {failed.has(r.key) ? (
+                  <X className="mt-0.5 h-4 w-4 shrink-0 text-bad" />
+                ) : (
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{r.name}</p>
+                  {hit.length > 0 ? (
+                    hit.map((a, i) => (
+                      <p key={i} className="text-sm text-bad">
+                        {anomalyDetail(a)}
+                      </p>
+                    ))
+                  ) : (
+                    <p className="text-sm text-faint">Passed</p>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="flex items-center justify-between gap-3 border-t border-rule px-5 py-2.5 text-xs text-faint">
+          <span>Block hash</span>
+          <span className="hash truncate">{shortHash(block.hash, 16)}</span>
+        </div>
+      </section>
+
+      {history && (
+        <section className="panel">
+          <PanelHeader title="Chain of custody" meta={`${history.events.length} events`} />
+          <ol className="px-5 py-4">
+            {history.events.map((ev, i) => {
+              const flagged = (ev.aiResult?.anomalies.length ?? 0) > 0;
+              const last = i === history.events.length - 1;
+              return (
+                <li key={ev.index} className="relative flex gap-4 pb-5 last:pb-0">
+                  {!last && <span className="absolute left-[5px] top-4 h-full w-px bg-rule" />}
+                  <span
+                    className={`relative mt-1.5 h-[11px] w-[11px] shrink-0 rounded-full border-2 bg-panel ${
+                      flagged ? 'border-bad' : ev.type === 'MINT' ? 'border-brand' : 'border-ok'
+                    }`}
+                  />
+                  <div className="flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-4">
+                    <p className="text-sm">
+                      <span className="font-medium">{ev.stage}</span>
+                      <span className="text-sub"> in {ev.location}</span>
+                      {flagged && <span className="tag ml-2 bg-bad-soft text-bad">FLAGGED</span>}
+                    </p>
+                    <p className="text-xs text-faint">
+                      {formatTime(ev.timestamp)} · block #{ev.index}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
     </div>
   );
 }

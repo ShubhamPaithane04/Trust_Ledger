@@ -73,13 +73,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "ChainVerify" },
-      { name: "description", content: "ChainVerify" },
-      { name: "author", content: "Lovable" },
+      { name: "description", content: "AI + blockchain product authentication for supply chains." },
+      { name: "author", content: "Shubham Paithane" },
       { property: "og:title", content: "ChainVerify" },
-      { property: "og:description", content: "ChainVerify" },
+      { property: "og:description", content: "AI + blockchain product authentication for supply chains." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {

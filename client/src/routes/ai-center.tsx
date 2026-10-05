@@ -1,112 +1,112 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useState, useEffect } from 'react';
-import { Activity, ShieldAlert, Cpu } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
+import { Empty, PanelHeader, ScoreBar } from '../components/Parts';
+import { RULES, anomalyDetail, formatTime, ruleFor } from '@/lib/chainverify';
+import { useAlerts, useProducts } from '@/lib/queries';
 
 export const Route = createFileRoute('/ai-center')({
-  component: AITrustCenter,
+  component: Alerts,
+  head: () => ({ meta: [{ title: 'Alerts | ChainVerify' }] }),
 });
 
-function AITrustCenter() {
-  const [alerts, setAlerts] = useState<any[]>([]);
+function Alerts() {
+  const { data: alerts } = useAlerts();
+  const { data: products } = useProducts();
+  const [rule, setRule] = useState<string>('all');
 
-  useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const res = await fetch('/api/alerts').then(r => r.json());
-        setAlerts(res);
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    fetchAlerts();
-    const interval = setInterval(fetchAlerts, 2000);
-    return () => clearInterval(interval);
-  }, []);
+  const list = alerts ?? [];
+  const countFor = (key: string) => list.filter((a) => a.anomalies.some((x) => x.startsWith(key))).length;
+  const shown = rule === 'all' ? list : list.filter((a) => a.anomalies.some((x) => x.startsWith(rule)));
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6 max-w-5xl mx-auto">
-        <header className="flex justify-between items-center mb-10">
-          <div>
-            <h2 className="text-3xl font-bold flex items-center gap-3 font-display tracking-tight text-[var(--cv-text)]">
-              <Cpu className="w-10 h-10 text-[var(--cv-purple)]" />
-              AI Trust & Security Center
-            </h2>
-            <p className="text-[var(--cv-muted)] mt-2 font-mono tracking-widest text-sm">LIVE ANOMALY DETECTION AND SUPPLY CHAIN MONITORING</p>
-          </div>
-          
-          <div className="glass bg-white/40 px-6 py-3 flex items-center gap-4 rounded-full border-[var(--cv-cyan)]/30 shadow-sm">
-            <Activity className="w-6 h-6 text-[var(--cv-cyan)] animate-pulse glow-cyan" />
-            <div>
-              <div className="text-[10px] text-[var(--cv-muted)] tracking-widest font-bold">SYSTEM STATUS</div>
-              <div className="text-[var(--cv-cyan)] font-bold font-mono tracking-wider">ACTIVE & MONITORING</div>
+    <DashboardLayout
+      title="Alerts"
+      description="Scans the anomaly checks scored below 100. Anything under 70 is treated as a likely counterfeit."
+    >
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <aside className="space-y-6 lg:col-span-4">
+          <section className="panel">
+            <PanelHeader title="Detection rules" />
+            <div className="p-2">
+              <RuleButton active={rule === 'all'} onClick={() => setRule('all')} name="All alerts" count={list.length} />
+              {RULES.map((r) => (
+                <RuleButton
+                  key={r.key}
+                  active={rule === r.key}
+                  onClick={() => setRule(r.key)}
+                  name={r.name}
+                  detail={`${r.detail} Costs ${r.penalty} points.`}
+                  count={countFor(r.key)}
+                />
+              ))}
             </div>
-          </div>
-        </header>
+          </section>
+        </aside>
 
-        <div className="grid grid-cols-1 gap-6">
-          <h3 className="text-xl font-bold text-[var(--cv-text)] border-b border-[var(--cv-border)] pb-4 font-display tracking-wider flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[var(--cv-purple)]"></span> RECENT AI FLAGS
-          </h3>
-          
-          {alerts.length === 0 && (
-            <div className="text-center py-20 glass bg-white/40 rounded-xl border-[var(--cv-border)] shadow-sm">
-              <ShieldAlert className="w-12 h-12 text-[var(--cv-muted)] mx-auto mb-4 opacity-50" />
-              <div className="text-[var(--cv-muted)] font-mono tracking-widest font-bold">NO ANOMALIES DETECTED IN THE NETWORK</div>
-            </div>
-          )}
-
-          <AnimatePresence>
-            {alerts.map((alert) => (
-              <motion.div
-                key={alert.id}
-                initial={{ opacity: 0, y: -20, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="bg-white/60 border border-[var(--cv-red)]/30 glow-red rounded-xl p-6 flex flex-col md:flex-row gap-6 relative overflow-hidden backdrop-blur-md shadow-lg"
-              >
-                <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-[var(--cv-red)] to-[var(--cv-orange)]"></div>
-                
-                <div className="flex-shrink-0 flex flex-col items-center justify-center p-6 bg-[var(--cv-red)]/5 rounded-xl border border-[var(--cv-red)]/10 min-w-[140px]">
-                  <ShieldAlert className="w-12 h-12 text-[var(--cv-red)] mb-3 animate-pulse drop-shadow-[0_0_15px_rgba(155,44,44,0.3)]" />
-                  <span className="text-3xl font-black font-display text-[var(--cv-red)]">{alert.trustScore}%</span>
-                  <span className="text-[10px] text-[var(--cv-muted)] tracking-widest mt-1 font-bold">TRUST SCORE</span>
-                </div>
-
-                <div className="flex-1 flex flex-col justify-center">
-                  <div className="flex justify-between items-start mb-4">
+        <section className="panel overflow-hidden lg:col-span-8">
+          <PanelHeader title={rule === 'all' ? 'All alerts' : RULES.find((r) => r.key === rule)?.name ?? ''} meta={`${shown.length} shown`} />
+          {!alerts ? (
+            <Empty>Loading alerts…</Empty>
+          ) : shown.length === 0 ? (
+            <Empty>No alerts for this rule. Every matching scan passed.</Empty>
+          ) : (
+            <ul className="divide-y divide-rule">
+              {shown.map((a) => (
+                <li key={a.id} className="px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h4 className="text-xl font-bold text-[var(--cv-text)] mb-2 font-display tracking-wider">Counterfeit Activity Suspected</h4>
-                      <p className="text-[var(--cv-muted)] text-sm font-mono font-bold">
-                        PRODUCT ID: <span className="text-[var(--cv-text)] bg-[var(--cv-surface)] px-2 py-0.5 rounded border border-[var(--cv-border)]">{alert.productId}</span> @ {alert.location.toUpperCase()}
+                      <p className="text-sm">
+                        <span className="font-mono text-xs">{a.productId}</span>
+                        <span className="ml-2 font-medium">{products?.[a.productId]?.name}</span>
+                      </p>
+                      <p className="mt-0.5 text-xs text-faint">
+                        Scanned in {a.location} · {formatTime(a.timestamp)}
                       </p>
                     </div>
-                    <div className="text-xs text-[var(--cv-muted)] font-mono tracking-widest bg-[var(--cv-surface)] px-3 py-1 rounded-full border border-[var(--cv-border)] font-bold">
-                      {new Date(alert.timestamp).toLocaleTimeString()}
-                    </div>
+                    <ScoreBar score={a.trustScore} />
                   </div>
-
-                  <div className="space-y-3 mt-2">
-                    {alert.anomalies.map((anom: string, i: number) => (
-                      <motion.div 
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.1 }}
-                        key={i} 
-                        className="flex items-start gap-3 bg-[var(--cv-surface)] p-3 rounded-lg text-sm text-[var(--cv-orange)] border border-[var(--cv-red)]/20 font-mono shadow-sm font-bold"
-                      >
-                        <span className="text-[var(--cv-red)]">&gt;</span> {anom.toUpperCase()}
-                      </motion.div>
+                  <ul className="mt-3 space-y-2">
+                    {a.anomalies.map((x, i) => (
+                      <li key={i} className="rounded-[4px] border-l-[3px] border-l-bad bg-bad-soft px-3 py-2">
+                        <p className="text-xs font-semibold text-bad">{ruleFor(x)?.name ?? 'Anomaly'}</p>
+                        <p className="mt-0.5 text-sm text-ink">{anomalyDetail(x)}</p>
+                      </li>
                     ))}
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
     </DashboardLayout>
+  );
+}
+
+function RuleButton({
+  active,
+  onClick,
+  name,
+  detail,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  name: string;
+  detail?: string;
+  count: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex w-full items-start gap-3 rounded-[4px] px-3 py-2.5 text-left ${active ? 'bg-brand-soft' : 'hover:bg-paper'}`}
+    >
+      <div className="min-w-0 flex-1">
+        <p className={`text-sm font-medium ${active ? 'text-brand' : ''}`}>{name}</p>
+        {detail && <p className="mt-0.5 text-xs leading-relaxed text-sub">{detail}</p>}
+      </div>
+      <span className={`tabular text-sm font-semibold ${count ? 'text-bad' : 'text-faint'}`}>{count}</span>
+    </button>
   );
 }
